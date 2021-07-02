@@ -64,7 +64,8 @@
             "communicator": "winrm",
             "winrm_use_ssl": "true",
             "winrm_insecure": "true",
-            "winrm_username": "packer"
+            "winrm_username": "packer",
+            "build_key_vault_name": "fp-core-prod-vault"
         }
     ],
     "provisioners": [

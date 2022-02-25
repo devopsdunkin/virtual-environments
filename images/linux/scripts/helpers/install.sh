@@ -48,7 +48,7 @@ download_with_retries() {
 ## if ! IsPackageInstalled packageName; then
 ##     echo "packageName is not installed!"
 ## fi
-function IsPackageInstalled {
+IsPackageInstalled() {
     dpkg -S $1 &> /dev/null
 }
 
@@ -65,4 +65,23 @@ get_toolset_value() {
     local toolset_path=$(get_toolset_path)
     local query=$1
     echo "$(jq -r "$query" $toolset_path)"
+}
+
+get_github_package_download_url() {
+    local REPO_ORG=$1
+    local FILTER=$2
+    local VERSION=$3
+    local SEARCH_IN_COUNT="100"
+
+    json=$(curl -s "https://api.github.com/repos/${REPO_ORG}/releases?per_page=${SEARCH_IN_COUNT}")
+
+    if [ -n "$VERSION" ]; then
+        tagName=$(echo $json | jq -r '.[] | select(.prerelease==false).tag_name' | sort --unique --version-sort | egrep -v ".*-[a-z]|beta" | egrep "\w*${VERSION}" | tail -1)
+    else
+        tagName=$(echo $json | jq -r '.[] | select(.prerelease==false).tag_name' | sort --unique --version-sort | egrep -v ".*-[a-z]|beta" | tail -1)
+    fi    
+
+    downloadUrl=$(echo $json | jq -r ".[] | select(.tag_name==\"${tagName}\").assets[].browser_download_url | select(${FILTER})" | head -n 1)
+
+    echo $downloadUrl
 }

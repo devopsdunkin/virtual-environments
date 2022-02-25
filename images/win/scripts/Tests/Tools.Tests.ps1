@@ -41,14 +41,17 @@ Describe "R" {
 Describe "DACFx" {
     It "DACFx" {
         (Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*).DisplayName -Contains "Microsoft SQL Server Data-Tier Application Framework (x64)" | Should -BeTrue
-        $sqlPackagePath = 'C:\Program Files\Microsoft SQL Server\150\DAC\bin\SqlPackage.exe'
-        $sqlLocalDBPath = 'C:\Program Files\Microsoft SQL Server\130\Tools\Binn\SqlLocalDB.exe'
+        $sqlPackagePath = 'C:\Program Files\Microsoft SQL Server\160\DAC\bin\SqlPackage.exe'
         "${sqlPackagePath}" | Should -Exist
+    }
+
+    It "SqlLocalDB" -Skip:(Test-IsWin22) {
+        $sqlLocalDBPath = 'C:\Program Files\Microsoft SQL Server\130\Tools\Binn\SqlLocalDB.exe'
         "${sqlLocalDBPath}" | Should -Exist
     }
 }
 
-Describe "DotnetTLS" {
+Describe "DotnetTLS" -Skip:(Test-IsWin22) {
     It "Tls 1.2 is enabled" {
         [Net.ServicePointManager]::SecurityProtocol -band "Tls12" | Should -Be Tls12
     }
@@ -88,7 +91,7 @@ Describe "Mingw64" {
     }
 }
 
-Describe "GoogleCloudSDK"  {
+Describe "GoogleCloudSDK" -Skip:(Test-IsWin22) {
     It "<ToolName>" -TestCases @(
         @{ ToolName = "bq" }
         @{ ToolName = "gcloud" }
@@ -131,6 +134,10 @@ Describe "ServiceFabricSDK" {
     It "PowerShell Module" {
         Get-Module -Name ServiceFabric -ListAvailable | Should -Not -BeNullOrEmpty
     }
+
+    It "ServiceFabricSDK version" {
+        Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Service Fabric\' -Name FabricVersion | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe "Stack" {
@@ -153,6 +160,22 @@ Describe "Vcpkg" {
     }
 }
 
+Describe "VCRedist" -Skip:(Test-IsWin22) {
+    It "vcredist_140" -Skip:(Test-IsWin19) {
+        "C:\Windows\System32\vcruntime140.dll" | Should -Exist
+    }
+
+    It "vcredist_2010_x64" -Skip:(Test-IsWin16) {
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{1D8E6291-B0D5-35EC-8441-6616F567A0F7}" | Should -Exist
+        "C:\Windows\System32\msvcr100.dll" | Should -Exist
+    }
+
+    It "vcredist_2010_x64" -Skip:(Test-IsWin16) {
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{1D8E6291-B0D5-35EC-8441-6616F567A0F7}" | Should -Exist
+        "C:\Windows\System32\msvcr100.dll" | Should -Exist
+    }
+}
+
 Describe "WebPlatformInstaller" {
     It "WebPlatformInstaller" {
         "WebPICMD" | Should -ReturnZeroExitCode
@@ -168,5 +191,19 @@ Describe "Zstd" {
 Describe "Pipx" {
     It "Pipx" {
         "pipx --version" | Should -ReturnZeroExitCode
+    }
+}
+
+Describe "Kotlin" {
+    $kotlinPackages =  @("kapt", "kotlin", "kotlinc", "kotlin-dce-js", "kotlinc-js", "kotlinc-jvm")
+
+    It "<toolName> is available" -TestCases ($kotlinPackages | ForEach-Object { @{ toolName = $_ } })  {
+        "$toolName -version" | Should -ReturnZeroExitCode
+    }
+}
+
+Describe "SQL OLEDB Driver" -Skip:(Test-IsWin16) {
+    It "SQL OLEDB Driver" {
+        "HKLM:\SOFTWARE\Microsoft\MSOLEDBSQL" | Should -Exist
     }
 }

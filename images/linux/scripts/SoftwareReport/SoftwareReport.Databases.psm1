@@ -1,7 +1,7 @@
 function Get-PostgreSqlVersion {
     $postgreSQLVersion = psql --version | Take-OutputPart -Part 2
     $aptSourceRepo = Get-AptSourceRepository -PackageName "postgresql"
-    return "Postgre SQL $postgreSQLVersion (apt source repository: $aptSourceRepo)"
+    return "PostgreSQL $postgreSQLVersion (apt source repository: $aptSourceRepo)"
 }
 
 function Get-MongoDbVersion {
@@ -16,7 +16,10 @@ function Get-SqliteVersion {
 }
 
 function Get-MySQLVersion {
-    $mySQLVersion = mysqld --version | Take-OutputPart -Part 2 | Take-OutputPart -Part 0 -Delimiter "-"
+    $mySQLVersion = mysqld --version | Take-OutputPart -Part 2
+    if (-not (Test-IsUbuntu20)) {
+        $mySQLVersion = $mySQLVersion | Take-OutputPart -Part 0 -Delimiter "-"
+    }
     return "MySQL $mySQLVersion"
 }
 
@@ -28,6 +31,21 @@ function Get-SQLCmdVersion {
 function Get-SqlPackageVersion {
     $sqlPackageVersion = sqlpackage /version
     return "SqlPackage $sqlPackageVersion"
+}
+
+function Build-PostgreSqlSection {
+    $output = ""
+
+    $output += New-MDHeader "PostgreSQL" -Level 4
+    $output += New-MDList -Style Unordered -Lines @(
+        (Get-PostgreSqlVersion ),
+        "PostgreSQL Server (user:postgres)"
+    )
+    $output += New-MDCode -Lines @(
+        "PostgreSQL service is disabled by default. Use the following command as a part of your job to start the service: 'sudo systemctl start postgresql.service'"
+    )
+
+    return $output
 }
 
 function Build-MySQLSection {

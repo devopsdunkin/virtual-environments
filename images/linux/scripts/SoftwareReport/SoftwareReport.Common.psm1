@@ -44,13 +44,6 @@ function Get-ClangVersions {
     return "Clang " + $clangVersions
 }
 
-function Get-LLVMInfo {
-    $clangVersions = Get-ClangToolVersions -ToolName "clang"
-    $clangFormatVersions = Get-ClangToolVersions -ToolName "clang-format"
-    $aptSourceRepo = Get-AptSourceRepository -PackageName "llvm"
-    return "LLVM components: Clang $clangFormatVersions, Clang-format $clangFormatVersions (apt source: $aptSourceRepo)"
-}
-
 function Get-ClangFormatVersions {
     $clangFormatVersions = Get-ClangToolVersions -ToolName "clang-format"
     return "Clang-format " + $clangFormatVersions
@@ -147,7 +140,7 @@ function Get-HomebrewVersion {
 }
 
 function Get-CpanVersion {
-    $result = Get-CommandResult "cpan --version"
+    $result = Get-CommandResult "cpan --version" -ExpectExitCode @(25, 255)
     $result.Output -match "version (?<version>\d+\.\d+) " | Out-Null
     $cpanVersion = $Matches.version
     return "cpan $cpanVersion"
@@ -179,6 +172,11 @@ function Get-NpmVersion {
 function Get-YarnVersion {
     $yarnVersion = yarn --version
     return "Yarn $yarnVersion"
+}
+
+function Get-ParcelVersion {
+    $parcelVersion = parcel --version
+    return "Parcel $parcelVersion"
 }
 
 function Get-PipVersion {
@@ -282,8 +280,7 @@ function Build-PHPSection {
 function Get-GHCVersion {
     $(ghc --version) -match "version (?<version>\d+\.\d+\.\d+)" | Out-Null
     $ghcVersion = $Matches.version
-    $aptSourceRepo = Get-AptSourceRepository -PackageName "ghc"
-    return "GHC $ghcVersion (apt source repository: $aptSourceRepo)"
+    return "GHC $ghcVersion"
 }
 
 function Get-GHCupVersion {
@@ -334,6 +331,20 @@ function Get-DotNetCoreSdkVersions {
     return $dotNetCoreSdkVersion
 }
 
+function Get-DotnetTools {
+    $env:PATH = "/etc/skel/.dotnet/tools:$($env:PATH)"
+
+    $dotnetTools = (Get-ToolsetContent).dotnet.tools
+
+    $toolsList = @()
+
+    ForEach ($dotnetTool in $dotnetTools) {
+        $toolsList += $dotnetTool.name + " " + (Invoke-Expression $dotnetTool.getversion)
+    }
+
+    return $toolsList
+}
+
 function Get-CachedDockerImages {
     $toolsetJson = Get-ToolsetContent
     $images = $toolsetJson.docker.images
@@ -360,6 +371,8 @@ function Get-AptPackages {
         if ($Null -eq $version) {
             $version = $(dpkg-query -W -f '${Version}' "$pkg*")
         }
+        
+        $version = $version -replace '~','\~'
 
         $output += [PSCustomObject] @{
             Name    = $pkg

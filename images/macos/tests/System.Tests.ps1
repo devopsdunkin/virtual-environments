@@ -1,3 +1,5 @@
+Import-Module "$PSScriptRoot/../helpers/Common.Helpers.psm1"
+
 $os = Get-OSVersion
 
 Describe "Disk free space" {
@@ -23,7 +25,7 @@ Describe "Certificate" {
     }
 }
 
-Describe "Audio device" {
+Describe "Audio device" -Skip:($os.IsVentura -or $os.IsVenturaArm64) {
     It "Sox is installed" {
         "sox --version" | Should -ReturnZeroExitCode
     }
@@ -32,25 +34,28 @@ Describe "Audio device" {
         "SwitchAudioSource -c" | Should -ReturnZeroExitCode
     }
 
-    It "Audio channel Soundflower (2ch)" -Skip:($os.IsHigherThanCatalina) {
-        SwitchAudioSource -c | Should -BeLikeExactly "Soundflower (2ch)"
-    }
-
-    It "Audio channel BlackHole 2ch" -Skip:($os.IsCatalina) {
+    It "Audio channel BlackHole 2ch" {
         SwitchAudioSource -c | Should -BeLikeExactly "BlackHole 2ch"
     }
 }
 
-Describe "Screen Resolution" {
+Describe "Screen Resolution" -Skip:(isVeertu) {
     It "Screen Resolution" {
         system_profiler SPDisplaysDataType | Select-String "Resolution" | Should -Match "1176 x 885|1920 x 1080"
     }
 }
 
-Describe "Open windows" {
+Describe "Open windows" -Skip:(isVeertu) {
     It "Opened windows not found" {
-        $cmd = "osascript -e 'tell application \""System Events\"" to get every window of (every process whose class of windows contains window)'"
+        'tell application id "com.apple.systemevents" to get every window of (every process whose class of windows contains window)' | Tee-Object /tmp/windows.osascript
+        $cmd = "osascript /tmp/windows.osascript"
         $openWindows = bash -c $cmd
         $openWindows.Split(",").Trim() | Where-Object { $_ -notmatch "NotificationCenter" } | Should -BeNullOrEmpty
+    }
+}
+
+Describe "AutomationModeTool" {
+    It "Does not require user authentication" -Skip:($os.IsBigSur) {
+        automationmodetool | Out-String | Should -Match "DOES NOT REQUIRE"
     }
 }

@@ -13,12 +13,28 @@ function Enable-AutoLogon {
         [string] $Password
     )
 
-    $url = "https://raw.githubusercontent.com/actions/virtual-environments/main/images/macos/provision/bootstrap-provisioner/kcpassword.py"
+    $url = "https://raw.githubusercontent.com/actions/runner-images/main/images/macos/provision/bootstrap-provisioner/setAutoLogin.sh"
     $script = Invoke-RestMethod -Uri $url
     $base64 = [Convert]::ToBase64String($script.ToCharArray())
-    $kcpassword = "echo $base64 | base64 --decode > ~/kcpassword;sudo python ./kcpassword '${Password}';rm ./kcpassword"
-    $loginwindow = "sudo /usr/bin/defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser '${UserName}';sudo /usr/bin/defaults write /Library/Preferences/com.apple.loginwindow autoLoginUserScreenLocked -bool false"
-    $command = "${kcpassword};$loginwindow"
+    $command = "echo $base64 | base64 --decode > ./setAutoLogin.sh;sudo bash ./setAutoLogin.sh '${UserName}' '${Password}';rm ./setAutoLogin.sh"
+    Invoke-SSHPassCommand -HostName $HostName -Command $command
+}
+
+function Invoke-SoftwareUpdateArm64 {
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $HostName,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Password
+    )
+
+    $url = "https://raw.githubusercontent.com/actions/runner-images/main/images/macos/provision/configuration/auto-software-update-arm64.exp"
+    $script = Invoke-RestMethod -Uri $url
+    $base64 = [Convert]::ToBase64String($script.ToCharArray())
+    $command = "echo $base64 | base64 --decode > ./auto-software-update-arm64.exp;chmod +x ./auto-software-update-arm64.exp; ./auto-software-update-arm64.exp ${Password};rm ./auto-software-update-arm64.exp"
     Invoke-SSHPassCommand -HostName $HostName -Command $command
 }
 
@@ -39,6 +55,84 @@ function Get-AvailableVersions {
     $allVersions
 }
 
+function Get-AvailableIPSWVersions {
+    param (
+        [bool] $IsBeta = $false,
+        [bool] $IsLatest = $true,
+        [string] $MacOSCodeNameOrVersion
+    )
+
+    if ($IsBeta) {
+        $command = { mist list installer "$MacOSCodeNameOrVersion" --include-betas --latest --export "/Applications/export.json"}
+    } elseif ($IsLatest) {
+        $command = { mist list installer "$MacOSCodeNameOrVersion" --latest  --export "/Applications/export.json" }
+    } else {
+        $command = { mist list installer "$MacOSCodeNameOrVersion"  --export "/Applications/export.json" }
+    }
+
+    $condition = { $LASTEXITCODE -eq 0 }
+    Invoke-WithRetry -Command $command -BreakCondition $condition | Out-Null
+    $softwareList = get-content -Path "/Applications/export.json"
+    $turgetVersion = ($softwareList | ConvertFrom-Json).version
+    if ($null -eq $turgetVersion) {
+        Write-Host "Requested macOS '$MacOSCodeNameOrVersion' version not found in the list of available installers."
+        $command = { mist list installer "$($MacOSCodeNameOrVersion.split('.')[0])" }
+        Invoke-WithRetry -Command $command -BreakCondition $condition
+        exit 1
+    }
+    return $turgetVersion
+}
+
+function Get-MacOSIPSWInstaller {
+    param (
+        [Parameter(Mandatory)]
+        [version] $MacOSVersion,
+
+        [bool] $DownloadLatestVersion = $false,
+        [bool] $BetaSearch = $false
+    )
+
+    if ($MacOSVersion -eq [version] "12.0") {
+        $MacOSName = "macOS Monterey"
+    } elseif ($MacOSVersion -eq [version] "13.0") {
+        $MacOSName = "macOS Ventura"
+    } else {
+        $MacOSName = $MacOSVersion.ToString()
+    }
+
+
+    Write-Host "`t[*] Finding available full installers"
+    if ($DownloadLatestVersion -eq $true) {
+        $targetVersion = Get-AvailableIPSWVersions -IsLatest $true -MacOSCodeNameOrVersion $MacOSName
+        Write-host "`t[*] The 'DownloadLatestVersion' flag is set to true. Latest macOS version is '$MacOSName' - '$targetVersion' now"
+    } elseif ($BetaSearch -eq $true) {
+        $targetVersion = Get-AvailableIPSWVersions -IsBeta $true -MacOSCodeNameOrVersion $MacOSName
+        Write-host "`t[*] The 'BetaSearch' flag is set to true. Latestbeta macOS version is '$MacOSName' - '$targetVersion' now"
+    } else {
+        $targetVersion = Get-AvailableIPSWVersions -MacOSCodeNameOrVersion $MacOSName
+        Write-host "`t[*] The exact version was specified - '$MacOSName' "
+    }
+
+    $installerPathPattern = "/Applications/Install ${macOSName}*.ipsw"
+    if (Test-Path $installerPathPattern) {
+        $previousInstallerPath = Get-Item -Path $installerPathPattern
+        Write-Host "`t[*] Removing '$previousInstallerPath' installation app before downloading the new one"
+        sudo rm -rf "$previousInstallerPath"
+    }
+
+    # Download macOS installer
+    $installerDir = "/Applications/"
+    $installerName = "Install ${macOSName}.ipsw"
+    Write-Host "`t[*] Requested macOS '$targetVersion' version installer found, fetching it from mist database"
+    Invoke-WithRetry { mist download firmware "$targetVersion" --output-directory $installerDir --firmware-name "$installerName" } {$LASTEXITCODE -eq 0} | Out-Null
+    if (Test-Path "$installerDir$installerName") {
+        $result = "$installerDir$installerName"
+    } else {
+        Write-host "`t[*] Requested macOS '$targetVersion' version installer failed to download"
+        exit 1
+    }
+    return $result
+}
 function Get-MacOSInstaller {
     param (
         [Parameter(Mandatory)]
@@ -73,20 +167,20 @@ function Get-MacOSInstaller {
             Show-StringWithFormat $availableVersions
             exit 1
         }
-        Show-StringWithFormat $filteredVersions 
+        Show-StringWithFormat $filteredVersions
         $osVersions = $filteredVersions.OSVersion | Sort-Object {[version]$_}
         $MacOSVersion = $osVersions | Select-Object -Last 1
         Write-Host "`t[*] The 'DownloadLatestVersion' flag is set. Latest macOS version is '$MacOSVersion' now"
     }
 
-    $macOSName = $availableVersions.Where{ $MacOSVersion -eq $_.OSVersion }.OSName
+    $macOSName = $availableVersions.Where{ $MacOSVersion -eq $_.OSVersion }.OSName.Split(" ")[1]
     if (-not $macOSName) {
         Write-Host "`t[x] Requested macOS '$MacOSVersion' version not found in the list of available installers. Available versions are:`n$($availableVersions.OSVersion)"
         Write-Host "`t[x] Make sure to pass '-BetaSearch `$true' if you need a beta version installer"
         exit 1
     }
 
-    $installerPathPattern = "/Applications/Install*${macOSName}.app"
+    $installerPathPattern = "/Applications/Install macOS ${macOSName}*.app"
     if (Test-Path $installerPathPattern) {
         $previousInstallerPath = Get-Item -Path $installerPathPattern
         Write-Host "`t[*] Removing '$previousInstallerPath' installation app before downloading the new one"
@@ -106,6 +200,10 @@ function Get-MacOSInstaller {
     }
 
     $installerPath = (Get-Item -Path $installerPathPattern).FullName
+    if (-not $installerPath) {
+        Write-Host "`t[x] Path not found using '$installerPathPattern'"
+        exit 1
+    }
     Write-Host "`t[*] Installer successfully downloaded to '$installerPath'"
 
     $installerPath
@@ -148,11 +246,29 @@ function Install-SoftwareUpdate {
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
-        [string] $HostName
+        [string] $HostName,
+        [array] $listOfUpdates,
+        [string] $Password
     )
-
-    $command = "sudo /usr/sbin/softwareupdate --all --install --restart --verbose"
-    Invoke-SSHPassCommand -HostName $HostName -Command $command
+    $osVersion = [Environment]::OSVersion
+    # If an update is happening on macOS 12 we will use the prepared list of updates, otherwise, we will install all updates.
+    if ($osVersion.Version.Major -eq "12") {
+        foreach ($update in $listOfUpdates){
+            # Filtering updates that contain "Ventura" word
+            if ($update -notmatch "Ventura") {
+                $command = "sudo /usr/sbin/softwareupdate --restart --verbose --install '$($update.trim())'"
+                Invoke-SSHPassCommand -HostName $HostName -Command $command
+            }
+        }
+    } else {
+        $osArch = $(arch)
+        if ($osArch -eq "arm64") {
+            Invoke-SoftwareUpdateArm64 -HostName $HostName -Password $Password
+        } else {
+            $command = "sudo /usr/sbin/softwareupdate --all --install --restart --verbose"
+            Invoke-SSHPassCommand -HostName $HostName -Command $command
+        }
+    }
 }
 
 function Invoke-SSHPassCommand {
@@ -230,7 +346,7 @@ function Show-StringWithFormat {
         [Parameter(ValuefromPipeline)]
         [object] $string
     )
-    
+
     process {
         ($string | Out-String).Trim().split("`n") | ForEach-Object { Write-Host "`t    $_" }
     }

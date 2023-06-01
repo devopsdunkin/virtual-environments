@@ -2,7 +2,9 @@ Import-Module "$PSScriptRoot/../helpers/Common.Helpers.psm1"
 Import-Module "$PSScriptRoot/../helpers/Xcode.Helpers.psm1"
 Import-Module "$PSScriptRoot/../helpers/Tests.Helpers.psm1" -DisableNameChecking
 
-$xcodeVersions = Get-ToolsetValue "xcode.versions"
+$ARCH = arch
+if ($ARCH -ne "arm64") { $ARCH = "x64" }
+$xcodeVersions = Get-ToolsetValue "xcode.$ARCH.versions"
 $defaultXcode = Get-ToolsetValue "xcode.default"
 $latestXcodeVersion = $xcodeVersions | Select-Object -First 1
 $os = Get-OSVersion
@@ -110,5 +112,22 @@ Describe "Xcode simulators" {
     AfterEach {
         $defaultXcode = Get-ToolsetValue "xcode.default"
         Switch-Xcode -Version $defaultXcode
+    }
+}
+
+Describe "Xcode Simulators Naming" -Skip:(-not $os.IsMonterey) {
+    $testCases = Get-BrokenXcodeSimulatorsList
+    It "Simulator '<SimulatorName> [<RuntimeId>]'" -TestCases $testCases {
+        $simctlPath = Get-XcodeToolPath -Version $XcodeVersion -ToolName "simctl"
+        [string]$rawDevicesInfo = Invoke-Expression "$simctlPath list devices --json"
+        $jsonDevicesInfo = ($rawDevicesInfo | ConvertFrom-Json).devices
+
+        $foundSimulators = $jsonDevicesInfo.$RuntimeId | Where-Object { $_.deviceTypeIdentifier -eq $DeviceId }
+        $foundSimulators | Should -HaveCount 1
+        $foundSimulators[0].name | Should -Be $SimulatorName
+
+        $foundSimulators = $jsonDevicesInfo.$RuntimeId | Where-Object { $_.name -eq $SimulatorName }
+        $foundSimulators | Should -HaveCount 1
+        $foundSimulators[0].deviceTypeIdentifier | Should -Be $DeviceId
     }
 }
